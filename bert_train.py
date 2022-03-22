@@ -1,4 +1,4 @@
-from transformers import BertForSequenceClassification, BertTokenizer, AdamW, BertConfig, \
+from transformers import BertForSequenceClassification, BertTokenizerFast, AdamW, BertConfig, \
     get_linear_schedule_with_warmup
 from torch.utils.data import TensorDataset, random_split
 from torch.utils.data import DataLoader, RandomSampler, SequentialSampler
@@ -497,7 +497,7 @@ if __name__ == "__main__":
 
     # Tokenize all of the sentences and map the tokens to their word IDs.
     print('Loading BERT tokenizer...', flush=True)
-    tokenizer = BertTokenizer.from_pretrained('bert-base-uncased', do_lower_case=True)
+    tokenizer = BertTokenizerFast.from_pretrained('bert-base-uncased', do_lower_case=True)
 
     label_set = set(df_train.label.values)
     label_to_index = {}

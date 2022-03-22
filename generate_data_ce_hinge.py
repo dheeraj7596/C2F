@@ -1,7 +1,7 @@
 import pickle
 import sys
 import torch
-from transformers import GPT2Tokenizer
+from transformers import GPT2TokenizerFast
 import pandas as pd
 import os
 import json
@@ -103,7 +103,7 @@ if __name__ == "__main__":
 
     pad_token_dict = pickle.load(open(os.path.join(data_dir, "pad_token_dict.pkl"), "rb"))
 
-    fine_tokenizer = GPT2Tokenizer.from_pretrained(fine_tok_path, do_lower_case=True)
+    fine_tokenizer = GPT2TokenizerFast.from_pretrained(fine_tok_path, do_lower_case=True)
     fine_model = torch.load(fine_model_path + "coarse_fine.pt", map_location=device)
 
     all_sents = []

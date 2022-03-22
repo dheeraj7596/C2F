@@ -1,5 +1,5 @@
 import torch
-from transformers import GPT2Tokenizer, GPT2LMHeadModel, get_linear_schedule_with_warmup, AdamW
+from transformers import GPT2TokenizerFast, GPT2LMHeadModel, get_linear_schedule_with_warmup, AdamW
 from torch.nn import CrossEntropyLoss, MarginRankingLoss
 from torch.utils.data import DataLoader, RandomSampler, SequentialSampler, TensorDataset, random_split
 import os
@@ -494,8 +494,8 @@ if __name__ == "__main__":
     os.makedirs(tok_path, exist_ok=True)
     os.makedirs(model_path, exist_ok=True)
 
-    tokenizer = GPT2Tokenizer.from_pretrained('gpt2', bos_token='<|startoftext|>', pad_token='<|pad|>',
-                                              additional_special_tokens=['<|labelsep|>', '<|labelpad|>'])
+    tokenizer = GPT2TokenizerFast.from_pretrained('gpt2', bos_token='<|startoftext|>', pad_token='<|pad|>',
+                                                  additional_special_tokens=['<|labelsep|>', '<|labelpad|>'])
 
     model = GPT2LMHeadModel.from_pretrained('gpt2')
     model.resize_token_embeddings(len(tokenizer))
