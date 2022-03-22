@@ -1,8 +1,7 @@
 import torch
 from transformers import GPT2Tokenizer, GPT2LMHeadModel, get_linear_schedule_with_warmup, AdamW
-from gpt2_coarse_finetune import basic_gpt2_tokenize, create_data_loaders, test_generate, format_time
-from torch.utils.data import TensorDataset
 from torch.nn import CrossEntropyLoss, MarginRankingLoss
+from torch.utils.data import DataLoader, RandomSampler, SequentialSampler, TensorDataset, random_split
 import os
 import pickle
 import sys
@@ -10,6 +9,105 @@ import numpy as np
 import random
 import time
 import pandas as pd
+import os
+import json
+import datetime
+
+
+def format_time(elapsed):
+    '''
+    Takes a time in seconds and returns a string hh:mm:ss
+    '''
+    # Round to the nearest second.
+    elapsed_rounded = int(round((elapsed)))
+
+    # Format as hh:mm:ss
+    return str(datetime.timedelta(seconds=elapsed_rounded))
+
+
+def create_data_loaders(dataset, batch_size):
+    # Calculate the number of samples to include in each set.
+    train_size = int(0.9 * len(dataset))
+    val_size = len(dataset) - train_size
+    # Divide the dataset by randomly selecting samples.
+    train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
+    # The DataLoader needs to know our batch size for training, so we specify it
+    # here. For fine-tuning BERT on a specific task, the authors recommend a batch
+    # size of 16 or 32.
+    # Create the DataLoaders for our training and validation sets.
+    # We'll take training samples in random order.
+    train_dataloader = DataLoader(
+        train_dataset,  # The training samples.
+        sampler=RandomSampler(train_dataset),  # Select batches randomly
+        batch_size=batch_size  # Trains with this batch size.
+    )
+    # For validation the order doesn't matter, so we'll just read them sequentially.
+    validation_dataloader = DataLoader(
+        val_dataset,  # The validation samples.
+        sampler=SequentialSampler(val_dataset),  # Pull out batches sequentially.
+        batch_size=batch_size  # Evaluate with this batch size.
+    )
+    return train_dataloader, validation_dataloader
+
+
+def test_generate(model, tokenizer, label_set, pad_token_dict, device):
+    model.eval()
+    for l in label_set:
+        print("Generating sentence for label", l)
+        temp_list = ["<|labelpad|>"] * pad_token_dict[l]
+        if len(temp_list) > 0:
+            label_str = " ".join(l.split("_")) + " " + " ".join(temp_list)
+        else:
+            label_str = " ".join(l.split("_"))
+        text = tokenizer.bos_token + " " + label_str + " <|labelsep|> "
+        sample_outputs = model.generate(
+            input_ids=tokenizer.encode(text, return_tensors='pt').to(device),
+            do_sample=True,
+            top_k=50,
+            max_length=200,
+            top_p=0.95,
+            num_return_sequences=1
+        )
+        for i, sample_output in enumerate(sample_outputs):
+            print("{}: {}".format(i, tokenizer.decode(sample_output)))
+
+
+def basic_gpt2_tokenize(tokenizer, sentences, labels, pad_token_dict, max_length=768):
+    input_ids = []
+    attention_masks = []
+    # For every sentence...
+    for i, sent in enumerate(sentences):
+        label = labels[i]
+        temp_list = ["<|labelpad|>"] * pad_token_dict[label]
+        if len(temp_list) > 0:
+            label_str = " ".join(label.split("_")) + " " + " ".join(temp_list)
+        else:
+            label_str = " ".join(label.split("_"))
+        encoded_dict = tokenizer.encode_plus(
+            label_str + " <|labelsep|> " + sent,  # Sentence to encode.
+            truncation=True,
+            max_length=max_length - 1,  # Pad & truncate all sentences.
+            pad_to_max_length=True,
+            return_attention_mask=True,  # Construct attn. masks.
+            return_tensors='pt',  # Return pytorch tensors.
+        )
+
+        encoded_dict['input_ids'] = torch.tensor(
+            [[tokenizer.bos_token_id] + encoded_dict['input_ids'].data.tolist()[0]]
+        )
+        encoded_dict['attention_mask'] = torch.tensor(
+            [[1] + encoded_dict['attention_mask'].data.tolist()[0]]
+        )
+        # Add the encoded sentence to the list.
+        input_ids.append(encoded_dict['input_ids'])
+
+        # And its attention mask (simply differentiates padding from non-padding).
+        attention_masks.append(encoded_dict['attention_mask'])
+    # Convert the lists into tensors.
+    input_ids = torch.cat(input_ids, dim=0)
+    attention_masks = torch.cat(attention_masks, dim=0)
+
+    return input_ids, attention_masks
 
 
 def gpt2_hinge_tokenize(tokenizer, sentences, labels, pad_token_dict, child_to_parent, max_length=768):
@@ -70,7 +168,7 @@ def compute_doc_prob(logits, b_fine_input_mask, b_fine_labels, doc_start_ind):
 
 
 def train(model, tokenizer, coarse_train_dataloader, coarse_validation_dataloader, fine_train_dataloader,
-          fine_validation_dataloader, doc_start_ind, parent_labels, child_labels, device):
+          fine_validation_dataloader, doc_start_ind, parent_labels, child_labels, pad_token_dict, device):
     def calculate_ce_loss(lm_logits, b_labels, b_input_mask, doc_start_ind):
         loss_fct = CrossEntropyLoss()
         batch_size = lm_logits.shape[0]
@@ -113,10 +211,8 @@ def train(model, tokenizer, coarse_train_dataloader, coarse_validation_dataloade
         ce_loss = calculate_ce_loss(lm_logits, b_labels, b_input_mask, doc_start_ind)
         if is_fine:
             hinge_loss = calculate_hinge_loss(fine_log_probs, other_log_probs)
-            print("CE-loss", ce_loss.item(), "Hinge-loss", hinge_loss.item(), flush=True)
         else:
             hinge_loss = 0
-            print("CE-loss", ce_loss.item(), "Hinge-loss", hinge_loss, flush=True)
         return ce_loss + lambda_1 * hinge_loss
 
     optimizer = AdamW(model.parameters(),
@@ -186,7 +282,6 @@ def train(model, tokenizer, coarse_train_dataloader, coarse_validation_dataloade
                             labels=b_labels)
 
             loss = calculate_loss(outputs[1], b_labels, b_input_mask, doc_start_ind, None, None, is_fine=False)
-            # loss = outputs[0]
             total_train_loss += loss.item()
 
             loss.backward()
@@ -255,9 +350,7 @@ def train(model, tokenizer, coarse_train_dataloader, coarse_validation_dataloade
 
             loss = calculate_loss(orig_output[1], orig_labels, orig_mask, doc_start_ind, batch_fine_log_probs,
                                   batch_other_log_probs, is_fine=True)
-            # loss = criterion(batch_fine_probs.log(), batch_coarse_probs.detach()).sum(dim=-1).mean(dim=-1).mean(dim=-1)
             total_train_loss += loss.item()
-            print("Loss:", loss.item(), flush=True)
 
             loss.backward()
             optimizer.step()
@@ -377,11 +470,15 @@ def train(model, tokenizer, coarse_train_dataloader, coarse_validation_dataloade
 
 
 if __name__ == "__main__":
-    # basepath = "/Users/dheerajmekala/Work/Coarse2Fine/data/"
-    basepath = "/data/dheeraj/coarse2fine/"
-    dataset = sys.argv[4] + "/"
-    pkl_dump_dir = basepath + dataset
+    data_dir = sys.argv[1]
+    model_dir = sys.argv[2]
+    iteration = sys.argv[3]
 
+    df = pickle.load(open(os.path.join(data_dir, "df_coarse.pkl"), "rb"))
+    with open(os.path.join(data_dir, "parent_to_child.json")) as f:
+        parent_to_child = json.load(f)
+
+    device = torch.device('cuda:0')
     seed_val = 81
     random.seed(seed_val)
     np.random.seed(seed_val)
@@ -390,33 +487,17 @@ if __name__ == "__main__":
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
-    algo = sys.argv[5]
-    tok_path = pkl_dump_dir + "gpt2/coarse_fine/" + algo + "/tokenizer"
-    model_path = pkl_dump_dir + "gpt2/coarse_fine/" + algo + "/model/"
+    tok_path = os.path.join(model_dir, "gpt2/coarse_fine/tokenizer")
+    model_path = os.path.join(model_dir, "gpt2/coarse_fine/model/")
     model_name = "coarse_fine.pt"
 
     os.makedirs(tok_path, exist_ok=True)
     os.makedirs(model_path, exist_ok=True)
 
-    use_gpu = int(sys.argv[1])
-    # use_gpu = False
-    gpu_id = int(sys.argv[2])
-    iteration = int(sys.argv[3])
-    # iteration = 1
-
-    # Tell pytorch to run this model on the GPU.
-    if use_gpu:
-        device = torch.device('cuda:' + str(gpu_id))
-    else:
-        device = torch.device("cpu")
-
-    df = pickle.load(open(pkl_dump_dir + "df_coarse.pkl", "rb"))
-    parent_to_child = pickle.load(open(pkl_dump_dir + "parent_to_child.pkl", "rb"))
-
-    tokenizer = GPT2Tokenizer.from_pretrained('gpt2-medium', bos_token='<|startoftext|>', pad_token='<|pad|>',
+    tokenizer = GPT2Tokenizer.from_pretrained('gpt2', bos_token='<|startoftext|>', pad_token='<|pad|>',
                                               additional_special_tokens=['<|labelsep|>', '<|labelpad|>'])
 
-    model = GPT2LMHeadModel.from_pretrained('gpt2-medium')
+    model = GPT2LMHeadModel.from_pretrained('gpt2')
     model.resize_token_embeddings(len(tokenizer))
     model.to(device)
 
@@ -444,13 +525,12 @@ if __name__ == "__main__":
     for l in all_labels:
         tokens = tokenizer.tokenize(" ".join(l.split("_")))
         pad_token_dict[l] = max_num - len(tokens)
-    # tokenizer.convert_ids_to_tokens(tokenizer.convert_tokens_to_ids(tokenizer.tokenize("<|startoftext|> sports <|labelsep|> Hello, my dog is cute <|endoftext|>")))
 
     df_weaksup = None
     for p in parent_to_child:
         for ch in parent_to_child[p]:
             temp_df = pickle.load(
-                open(pkl_dump_dir + "exclusive/" + algo + "/" + str(iteration) + "it/" + ch + ".pkl", "rb"))
+                open(os.path.join(data_dir, "exclusive/" + str(iteration) + "it/" + ch + ".pkl"), "rb"))
             temp_df["label"] = [ch] * len(temp_df)
             if df_weaksup is None:
                 df_weaksup = temp_df
@@ -483,9 +563,10 @@ if __name__ == "__main__":
                   doc_start_ind,
                   parent_labels,
                   child_labels,
+                  pad_token_dict,
                   device)
     test_generate(model, tokenizer, all_labels, pad_token_dict, device)
 
     tokenizer.save_pretrained(tok_path)
     torch.save(model, model_path + model_name)
-    pickle.dump(pad_token_dict, open(pkl_dump_dir + "pad_token_dict.pkl", "wb"))
+    pickle.dump(pad_token_dict, open(os.path.join(data_dir, "pad_token_dict.pkl"), "wb"))

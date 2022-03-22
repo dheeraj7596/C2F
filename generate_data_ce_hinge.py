@@ -4,6 +4,7 @@ import torch
 from transformers import GPT2Tokenizer
 import pandas as pd
 import os
+import json
 
 
 # def generate(l, tokenizer, model, pad_token_dict, num_samples=1000):
@@ -87,49 +88,33 @@ def post_process(sentences):
 
 
 if __name__ == "__main__":
-    # basepath = "/Users/dheerajmekala/Work/Coarse2Fine/data/"
-    basepath = "/data/dheeraj/coarse2fine/"
-    dataset = sys.argv[5] + "/"
-    pkl_dump_dir = basepath + dataset
-
-    use_gpu = int(sys.argv[1])
-    # use_gpu = False
-    gpu_id = int(sys.argv[2])
+    data_dir = sys.argv[1]
+    model_dir = sys.argv[2]
     parent_label = sys.argv[3]
     num = int(sys.argv[4])
-    algo = sys.argv[6]
 
-    os.makedirs(pkl_dump_dir + algo + "/", exist_ok=True)
+    device = torch.device('cuda:0')
 
-    base_fine_path = pkl_dump_dir + "gpt2/coarse_fine/" + algo + "/"
+    with open(os.path.join(data_dir, "parent_to_child.json")) as f:
+        parent_to_child = json.load(f)
 
-    # Tell pytorch to run this model on the GPU.
-    if use_gpu:
-        device = torch.device('cuda:' + str(gpu_id))
-    else:
-        device = torch.device("cpu")
+    fine_tok_path = os.path.join(model_dir, "gpt2/coarse_fine/tokenizer")
+    fine_model_path = os.path.join(model_dir, "gpt2/coarse_fine/model/")
 
-    parent_to_child = pickle.load(open(pkl_dump_dir + "parent_to_child.pkl", "rb"))
-
-    fine_label_path = base_fine_path
-    fine_tok_path = fine_label_path + "/tokenizer"
-    fine_model_path = fine_label_path + "/model/"
-
-    pad_token_dict = pickle.load(open(pkl_dump_dir + "/pad_token_dict.pkl", "rb"))
+    pad_token_dict = pickle.load(open(os.path.join(data_dir, "pad_token_dict.pkl"), "rb"))
 
     fine_tokenizer = GPT2Tokenizer.from_pretrained(fine_tok_path, do_lower_case=True)
     fine_model = torch.load(fine_model_path + "coarse_fine.pt", map_location=device)
 
     all_sents = []
     all_labels = []
-    for p in [parent_label]:
-        children = parent_to_child[p]
-        for ch in children:
-            sentences = generate(ch, fine_tokenizer, fine_model, pad_token_dict, num_samples=num)
-            sentences = post_process(sentences)
-            labels = [ch] * num
-            all_sents += sentences
-            all_labels += labels
+    children = parent_to_child[parent_label]
+    for ch in children:
+        sentences = generate(ch, fine_tokenizer, fine_model, pad_token_dict, num_samples=num)
+        sentences = post_process(sentences)
+        labels = [ch] * num
+        all_sents += sentences
+        all_labels += labels
 
-        df = pd.DataFrame.from_dict({"text": all_sents, "label": all_labels})
-        pickle.dump(df, open(pkl_dump_dir + algo + "/df_gen_" + p + ".pkl", "wb"))
+    df = pd.DataFrame.from_dict({"text": all_sents, "label": all_labels})
+    pickle.dump(df, open(os.path.join(data_dir, "df_gen_" + parent_label + ".pkl"), "wb"))

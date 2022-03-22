@@ -1,7 +1,6 @@
 from transformers import BertForSequenceClassification, BertTokenizer, AdamW, BertConfig, \
     get_linear_schedule_with_warmup
 from torch.utils.data import TensorDataset, random_split
-from classifier_seedwords import preprocess_df
 from torch.utils.data import DataLoader, RandomSampler, SequentialSampler
 import pickle
 import torch
@@ -15,6 +14,7 @@ from sklearn.metrics import classification_report
 from sklearn.model_selection import train_test_split
 import copy
 import pandas as pd
+import json
 
 
 # os.environ["CUDA_VISIBLE_DEVICES"] = "5"
@@ -462,46 +462,30 @@ def get_high_quality_inds(true, preds, pred_probs, label_to_index, num, threshol
 
 
 if __name__ == "__main__":
-    # basepath = "/Users/dheerajmekala/Work/Coarse2Fine/data/"
-    basepath = "/data/dheeraj/coarse2fine/"
-    dataset = sys.argv[6] + "/"
-    pkl_dump_dir = basepath + dataset
+    data_dir = sys.argv[1]
+    model_dir = sys.argv[2]
+    iteration = sys.argv[3]
+    parent_label = sys.argv[4]
 
-    use_gpu = int(sys.argv[1])
-    gpu_id = int(sys.argv[2])
-    iteration = int(sys.argv[3])
-    p = sys.argv[4]
-    dump_flag = sys.argv[5]
-    algo = sys.argv[7]
-
-    tok_path = pkl_dump_dir + "bert/" + p + "/tokenizer"
-    model_path = pkl_dump_dir + "bert/" + p + "/model"
+    device = torch.device('cuda:0')
+    tok_path = os.path.join(model_dir, "bert/" + parent_label + "/tokenizer")
+    model_path = os.path.join(model_dir, "bert/" + parent_label + "/model")
     os.makedirs(tok_path, exist_ok=True)
     os.makedirs(model_path, exist_ok=True)
 
-    # use_gpu = False
-    if sys.argv[6] == "nyt":
-        num_dic = {"arts": 46, "science": 21, "politics": 24, "sports": 270, "business": 33}
-    elif sys.argv[6] == "20news":
-        num_dic = {"science": 112, "recreation": 69, "computer": 65, "religion": 110, "politics": 24}
-    elif sys.argv[6] == "arxiv":
-        num_dic = {"cs": 56, "math": 43, "physics": 74}
-    else:
-        raise Exception("Unknown label detected")
+    with open(os.path.join(data_dir, "num_dic.json")) as f:
+        num_dic = json.load(f)
 
-    df_train = pickle.load(open(pkl_dump_dir + algo + "/df_gen_" + p + ".pkl", "rb"))
-    print(df_train["text"][0], df_train["label"][0], flush=True)
-    df_fine = pickle.load(open(pkl_dump_dir + "df_fine.pkl", "rb"))
+    df_train = pickle.load(open(os.path.join(data_dir, "df_gen_" + parent_label + ".pkl"), "rb"))
+    df_fine = pickle.load(open(os.path.join(data_dir, "df_fine.pkl"), "rb"))
     df_test = df_fine[df_fine["label"].isin(list(set(df_train.label.values)))].reset_index(drop=True)
 
-    parent_to_child = pickle.load(open(pkl_dump_dir + "parent_to_child.pkl", "rb"))
+    with open(os.path.join(data_dir, "parent_to_child.json")) as f:
+        parent_to_child = json.load(f)
 
-    for ch in parent_to_child[p]:
-        child_df = pickle.load(
-            open(pkl_dump_dir + "exclusive/" + algo + "/" + str(iteration) + "it/" + ch + ".pkl", "rb"))
+    for ch in parent_to_child[parent_label]:
         for i in range(1, iteration + 1):
-            temp_child_df = pickle.load(
-                open(pkl_dump_dir + "exclusive/" + algo + "/" + str(i) + "it/" + ch + ".pkl", "rb"))
+            temp_child_df = pickle.load(open(os.path.join(data_dir, "exclusive/" + str(i) + "it/" + ch + ".pkl"), "rb"))
             if i == 1:
                 child_df = temp_child_df
             else:
@@ -510,7 +494,6 @@ if __name__ == "__main__":
         df_train = pd.concat([df_train, child_df])
 
     print(df_train.label.value_counts())
-    # df_train = preprocess_df(df_train)
 
     # Tokenize all of the sentences and map the tokens to their word IDs.
     print('Loading BERT tokenizer...', flush=True)
@@ -532,26 +515,18 @@ if __name__ == "__main__":
     train_dataloader, validation_dataloader = create_data_loaders(dataset)
 
     # Tell pytorch to run this model on the GPU.
-    if use_gpu:
-        device = torch.device('cuda:' + str(gpu_id))
-    else:
-        device = torch.device("cpu")
 
     model = train(train_dataloader, validation_dataloader, device, num_labels=len(label_to_index))
     true, preds, pred_probs = test(df_test, label_to_index, index_to_label)
-    high_quality_inds = get_high_quality_inds(true, preds, pred_probs, label_to_index, num_dic[p],
+    high_quality_inds = get_high_quality_inds(true, preds, pred_probs, label_to_index, num_dic[parent_label],
                                               percent_threshold=20 * iteration)
 
-    if dump_flag:
-        for p in high_quality_inds:
-            inds = high_quality_inds[p]
-            temp_df = df_test.loc[inds].reset_index(drop=True)
-            os.makedirs(pkl_dump_dir + "exclusive/" + algo + "/" + str(iteration + 1) + "it", exist_ok=True)
-            pickle.dump(temp_df, open(
-                pkl_dump_dir + "exclusive/" + algo + "/" + str(iteration + 1) + "it/" + index_to_label[p] + ".pkl",
-                "wb"))
+    for p in high_quality_inds:
+        inds = high_quality_inds[p]
+        temp_df = df_test.loc[inds].reset_index(drop=True)
+        os.makedirs(os.path.join(data_dir, "exclusive/" + str(iteration + 1) + "it"), exist_ok=True)
+        pickle.dump(temp_df, open(
+            os.path.join(data_dir + "exclusive/" + str(iteration + 1) + "it/" + index_to_label[p] + ".pkl"), "wb"))
 
-    # tokenizer.save_pretrained(tok_path)
-    # torch.save(model, model_path + "/model.pt")
-    pickle.dump(pred_probs, open(model_path + "/pred_probs.pkl", "wb"))
-    pickle.dump(preds, open(model_path + "/preds.pkl", "wb"))
+    df_test["pred"] = preds
+    pickle.dump(df_test, open(os.path.join(data_dir + "preds_" + parent_label + ".pkl"), "wb"))
