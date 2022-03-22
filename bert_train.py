@@ -415,7 +415,7 @@ def test(df_test_original, label_to_index, index_to_label):
     return true, preds, pred_probs
 
 
-def get_high_quality_inds(true, preds, pred_probs, label_to_index, num, threshold=0.7, percent_threshold=20):
+def get_high_quality_inds(true, preds, pred_probs, label_to_index, num):
     pred_inds = []
     for p in preds:
         pred_inds.append(label_to_index[p])
@@ -428,17 +428,11 @@ def get_high_quality_inds(true, preds, pred_probs, label_to_index, num, threshol
             pred_label_to_inds[p] = [i]
 
     label_to_probs = {}
-    min_ct = float("inf")
     for p in pred_label_to_inds:
         label_to_probs[p] = []
-        ct_thresh = 0
         for ind in pred_label_to_inds[p]:
-            temp = pred_probs[ind][p]
-            if temp >= threshold:
-                ct_thresh += 1
-            label_to_probs[p].append(temp)
-        min_ct = min(min_ct, ct_thresh)
-    # min_ct = min(min_ct, int((percent_threshold / (len(label_to_index) * 100.0)) * len(preds)))
+            label_to_probs[p].append(pred_probs[ind][p])
+
     min_ct = num
     print("Collecting", min_ct, "samples as high quality")
     final_inds = {}
@@ -518,8 +512,7 @@ if __name__ == "__main__":
 
     model = train(train_dataloader, validation_dataloader, device, num_labels=len(label_to_index))
     true, preds, pred_probs = test(df_test, label_to_index, index_to_label)
-    high_quality_inds = get_high_quality_inds(true, preds, pred_probs, label_to_index, num_dic[parent_label],
-                                              percent_threshold=20 * iteration)
+    high_quality_inds = get_high_quality_inds(true, preds, pred_probs, label_to_index, num_dic[parent_label])
 
     for p in high_quality_inds:
         inds = high_quality_inds[p]
