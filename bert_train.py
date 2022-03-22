@@ -526,7 +526,7 @@ if __name__ == "__main__":
         temp_df = df_test.loc[inds].reset_index(drop=True)
         os.makedirs(os.path.join(data_dir, "exclusive/" + str(iteration + 1) + "it"), exist_ok=True)
         pickle.dump(temp_df, open(
-            os.path.join(data_dir + "exclusive/" + str(iteration + 1) + "it/" + index_to_label[p] + ".pkl"), "wb"))
+            os.path.join(data_dir, "exclusive/" + str(iteration + 1) + "it/" + index_to_label[p] + ".pkl"), "wb"))
 
     df_test["pred"] = preds
-    pickle.dump(df_test, open(os.path.join(data_dir + "preds_" + parent_label + ".pkl"), "wb"))
+    pickle.dump(df_test, open(os.path.join(data_dir, "preds_" + parent_label + ".pkl"), "wb"))
