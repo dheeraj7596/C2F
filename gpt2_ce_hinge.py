@@ -56,10 +56,10 @@ def test_generate(model, tokenizer, label_set, pad_token_dict, device):
         print("Generating sentence for label", l)
         temp_list = ["<|labelpad|>"] * pad_token_dict[l]
         if len(temp_list) > 0:
-            label_str = " ".join(l.split("_")) + " " + " ".join(temp_list)
+            label_str = " ".join(l.split("_")) + "".join(temp_list)
         else:
             label_str = " ".join(l.split("_"))
-        text = tokenizer.bos_token + " " + label_str + " <|labelsep|> "
+        text = tokenizer.bos_token + label_str + "<|labelsep|>"
         sample_outputs = model.generate(
             input_ids=tokenizer.encode(text, return_tensors='pt').to(device),
             do_sample=True,
@@ -80,11 +80,11 @@ def basic_gpt2_tokenize(tokenizer, sentences, labels, pad_token_dict, max_length
         label = labels[i]
         temp_list = ["<|labelpad|>"] * pad_token_dict[label]
         if len(temp_list) > 0:
-            label_str = " ".join(label.split("_")) + " " + " ".join(temp_list)
+            label_str = " ".join(label.split("_")) + "".join(temp_list)
         else:
             label_str = " ".join(label.split("_"))
         encoded_dict = tokenizer.encode_plus(
-            label_str + " <|labelsep|> " + sent,  # Sentence to encode.
+            label_str + "<|labelsep|>" + sent,  # Sentence to encode.
             truncation=True,
             max_length=max_length - 1,  # Pad & truncate all sentences.
             pad_to_max_length=True,
@@ -123,11 +123,11 @@ def gpt2_hinge_tokenize(tokenizer, sentences, labels, pad_token_dict, child_to_p
             processed_label_str = " ".join(label.split("_"))
             temp_list = ["<|labelpad|>"] * pad_token_dict[label]
             if len(temp_list) > 0:
-                label_str = processed_label_str + " " + " ".join(temp_list)
+                label_str = processed_label_str + "".join(temp_list)
             else:
                 label_str = processed_label_str
             encoded_dict = tokenizer.encode_plus(
-                label_str + " <|labelsep|> " + sent,  # Sentence to encode.
+                label_str + "<|labelsep|>" + sent,  # Sentence to encode.
                 truncation=True,
                 max_length=max_length - 1,  # Pad & truncate all sentences.
                 pad_to_max_length=True,
@@ -254,10 +254,10 @@ def train(model, tokenizer, coarse_train_dataloader, coarse_validation_dataloade
                 lbl = random.choice(parent_labels)
                 temp_list = ["<|labelpad|>"] * pad_token_dict[lbl]
                 if len(temp_list) > 0:
-                    label_str = " ".join(lbl.split("_")) + " " + " ".join(temp_list)
+                    label_str = " ".join(lbl.split("_")) + "".join(temp_list)
                 else:
                     label_str = " ".join(lbl.split("_"))
-                text = tokenizer.bos_token + " " + label_str + " <|labelsep|> "
+                text = tokenizer.bos_token + label_str + "<|labelsep|>"
                 sample_outputs = model.generate(
                     input_ids=tokenizer.encode(text, return_tensors='pt').to(device),
                     do_sample=True,
@@ -298,10 +298,10 @@ def train(model, tokenizer, coarse_train_dataloader, coarse_validation_dataloade
                 lbl = random.choice(child_labels)
                 temp_list = ["<|labelpad|>"] * pad_token_dict[lbl]
                 if len(temp_list) > 0:
-                    label_str = " ".join(lbl.split("_")) + " " + " ".join(temp_list)
+                    label_str = " ".join(lbl.split("_")) + "".join(temp_list)
                 else:
                     label_str = " ".join(lbl.split("_"))
-                text = tokenizer.bos_token + " " + label_str + " <|labelsep|> "
+                text = tokenizer.bos_token + label_str + "<|labelsep|>"
                 sample_outputs = model.generate(
                     input_ids=tokenizer.encode(text, return_tensors='pt').to(device),
                     do_sample=True,
@@ -520,7 +520,7 @@ if __name__ == "__main__":
         tokens = tokenizer.tokenize(" ".join(l.split("_")))
         max_num = max(max_num, len(tokens))
 
-    doc_start_ind = 1 + max_num + 1  # this gives the token from which the document starts in the inputids, 1 for the starttoken, max_num for label info, 1 for label_sup
+    doc_start_ind = 1 + max_num + 1  # this gives the token from which the document starts in the inputids, 1 for the starttoken, max_num for label info, 1 for label_sep
 
     for l in all_labels:
         tokens = tokenizer.tokenize(" ".join(l.split("_")))
