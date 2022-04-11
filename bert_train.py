@@ -458,7 +458,7 @@ def get_high_quality_inds(true, preds, pred_probs, label_to_index, num):
 if __name__ == "__main__":
     data_dir = sys.argv[1]
     model_dir = sys.argv[2]
-    iteration = sys.argv[3]
+    iteration = int(sys.argv[3])
     parent_label = sys.argv[4]
 
     device = torch.device('cuda:0')
